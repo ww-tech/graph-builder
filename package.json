@@ -1,0 +1,28 @@
+{
+  "name": "graph-sync",
+  "version": "1.0.0",
+  "description": "Keep PostgreSQL and Neo4j in sync using Kafka Connector.",
+  "main": "src/index.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {
+    "esm": "^3.2.25"
+  },
+  "devDependencies": {
+    "pg": "^8.6.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ww-tech/graph-sync.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ww-tech/graph-sync/issues"
+  },
+  "homepage": "https://github.com/ww-tech/graph-sync#readme"
+}

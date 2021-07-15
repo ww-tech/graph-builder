@@ -72,18 +72,18 @@ import pg from 'pg'
 import neo4j from 'neo4j-driver'
 import Kafka from 'kafka'
 
-const pgClient = new pg.Pool()
+const pgPool = new pg.Pool()
 const neo4jDriver = neo4j.driver()
 const kafka = new Kafka()
 const kafkaConsumer = kafka.consumer()
-const graphSync = new GraphSync({ pgClient, neo4jDriver, kafkaConsumer })
+const graphSync = new GraphSync({ pgPool, neo4jDriver, kafkaConsumer })
 ```
 
 ### 3. Define the nodes, labels, properties and relationships for the graph
 
 ```js
 // Specify the relational table and corresponding label for the graph.
-graphSync.registerTable({
+await graphSync.registerTable({
   tableName: 'cuisines',
   getLabels: () => ['Cuisine']
 })
@@ -91,7 +91,7 @@ graphSync.registerTable({
 // By default, all relational columns (except foreign keys) are saved
 // as properties for the nodes in the graph. You can transform the
 // data if you want different custom properties in the graph.
-graphSync.registerTable({
+await graphSync.registerTable({
   tableName: 'foods',
   getLabels: row => row.isBeverage ? ['Beverage'] : ['Food'],
   getProperties: row => ({ ...row, myCustomProperty: 123 })
@@ -99,7 +99,7 @@ graphSync.registerTable({
 
 // You can create one-to-many relationships between "this" node and 
 // another node using the name of the foreign key constraint.
-graphSync.registerTable({
+await graphSync.registerTable({
   tableName: 'recipes',
   getLabels: () => ['Recipe'],
   getRelationships: row => ['(this)-[:HAS_CUISINE]->(cuisine)']
@@ -107,7 +107,7 @@ graphSync.registerTable({
 
 // You can create many-to-many relationships between foreign keys.
 // We've omitted a label, so it will not create a node on the graph.
-graphSync.registerTable({
+await graphSync.registerTable({
   tableName: 'ingredients',
   getRelationships: row => ['(recipe)-[:HAS_INGREDIENT]->(food)']
 })
@@ -122,7 +122,3 @@ await graphSync.initialLoad()
 // Subscribe to the Kafka topic and update the graph
 graphSync.listen()
 ```
-
-## Known Issues
-
-1. Multi-column foreign key constraints are not yet supported.
