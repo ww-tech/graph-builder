@@ -11,4 +11,4 @@ create table books (
   constraint author foreign key (author_id) REFERENCES authors (id)
 );
 insert into authors (id, name) values (1, 'F. Scott Fitzgerald');
-insert into books (id, title, author_id) values (1, 'The Great Gatsby', 1);
+insert into books (id, title, author_id) values (2, 'The Great Gatsby', 1);

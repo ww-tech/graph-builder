@@ -9,10 +9,6 @@ let pgPool
 let graphSync
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
-const findOne = async (tableName, id) => {
-  const { rows } = await graphSync.pgQuery(`select * from "${tableName}" where id = $1`, [id])
-  return rows[0]
-}
 
 test.before(async function () {
   await pgSetup()
@@ -32,23 +28,25 @@ test.serial('registerTable', async t => {
   await graphSync.registerTable({
     tableName: 'books',
     getLabels: () => ['Book'],
-    getProperties: row => ({ id: row.id, title: row.title })
+    getProperties: row => ({ id: row.id, title: row.title }),
+    getRelationships: row => (['(this)-[:HAS_AUTHOR]->(author)'])
   })
+  t.deepEqual(graphSync.tables.books.primaryKey, ['id'])
   t.is(graphSync.tables.books.foreignKeys.author.foreignTable, 'authors')
   t.deepEqual(graphSync.tables.books.getLabels(), ['Book'])
 })
 
 test.serial('generateNode single label', async t => {
-  const row = await findOne('books', 1)
+  const row = await graphSync.findOne('books', { id: 2 })
   const cypher = await graphSync.generateNode({
     tableName: 'books',
     row
   })
-  t.is(cypher, "MERGE (:Book {id: 1, title: 'The Great Gatsby'});")
+  t.is(cypher, "MERGE (:Book {id: 2, title: 'The Great Gatsby'});")
 })
 
 test.serial('generateNode multiple labels', async t => {
-  const row = await findOne('authors', 1)
+  const row = await graphSync.findOne('authors', { id: 1 })
   const cypher = await graphSync.generateNode({
     tableName: 'authors',
     row
@@ -56,6 +54,14 @@ test.serial('generateNode multiple labels', async t => {
   t.is(cypher, "MERGE (:Person:Author {id: 1, name: 'F. Scott Fitzgerald'});")
 })
 
+test.serial('generateRelationships', async t => {
+  const row = await graphSync.findOne('books', { id: 2 })
+  const cypher = await graphSync.generateRelationships({
+    tableName: 'books',
+    row
+  })
+  t.is(cypher, "MATCH (this:Book), (author:Person:Author) WHERE this.id = '2' AND author.id = '1' MERGE (this)-[:HAS_AUTHOR]->(author);")
+})
 
 test.after(() => {
   pgTeardown()
