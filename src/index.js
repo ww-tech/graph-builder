@@ -29,8 +29,10 @@ export default class GraphSync {
     if (!tableName) throw new Error('generateNode: `tableName` is required.')
     if (!row) throw new Error('generateNode: `row` is required.')
     const { getLabels, getProperties } = this.tables[tableName]
+    if (!getLabels) return
     const labels = await getLabels(row)
     if (!labels.length) return
+    if (!getProperties) throw new Error('generateNode: `getProperties` is undefined.')
     const labelStr = `:${labels.join(':')}`
     const properties = await getProperties(row)
     return `MERGE (${labelStr} ${stringifyProperties(properties)});`
