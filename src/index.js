@@ -1,3 +1,5 @@
+import stringifyProperties from './stringifyProperties'
+
 export default class GraphSync {
   constructor({ pgPool, neo4jClient, kafkaConsumerClient }) {
     this.pgPool = pgPool
@@ -20,6 +22,18 @@ export default class GraphSync {
       getProperties,
       getRelationships
     }
+  }
+
+  async generateNode(options = {}) {
+    const { tableName, row } = options
+    if (!tableName) throw new Error('generateNode: `tableName` is required.')
+    if (!row) throw new Error('generateNode: `row` is required.')
+    const { getLabels, getProperties } = this.tables[tableName]
+    const labels = await getLabels(row)
+    if (!labels.length) return
+    const labelStr = `:${labels.join(':')}`
+    const properties = await getProperties(row)
+    return `MERGE (${labelStr} ${stringifyProperties(properties)});`
   }
 
   async pgQuery(sql, values) {
