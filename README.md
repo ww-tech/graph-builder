@@ -6,7 +6,7 @@ Keep PostgreSQL and Neo4j in sync using Kafka Connector.
 
 #### `new GraphSync(options)` - Create a GraphSync instance
 - `options` {Object}
-  - `pgClient` {Pool} postgres client (must have `connect()` method)
+  - `pgPool` {Pool} postgres client (must have `connect()` method)
   - `neo4jClient` {GraphDatabase} neo4j client (must have `cypher()` method)
   - `kafkaConsumer` {Consumer} kafka consumer (must have `run()` method)
 
