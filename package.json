@@ -2,7 +2,7 @@
   "name": "graph-sync",
   "version": "1.0.0",
   "description": "Keep PostgreSQL and Neo4j in sync using Kafka Connector.",
-  "main": "src/index.js",
+  "main": "src/GraphSync.js",
   "directories": {
     "test": "test"
   },

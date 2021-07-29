@@ -25,8 +25,12 @@ export default class GraphSync {
     }
   }
 
-  async generateNode(options = {}) {
-    const { tableName, row } = options
+  /**
+   * Generate the cypher query to add a node to the graph
+   * @param tableName {String}
+   * @param row {Object}
+   */
+  async generateNode(tableName, row) {
     if (!tableName) throw new Error('generateNode: `tableName` is required.')
     if (!row) throw new Error('generateNode: `row` is required.')
     const { getLabels, getProperties } = this.tables[tableName]
@@ -39,8 +43,12 @@ export default class GraphSync {
     return `MERGE (${labelStr} ${stringifyProperties(properties)});`
   }
 
-  async generateRelationships(options = {}) {
-    const { tableName, row } = options
+  /**
+   * Generate the cypher query to add a relationship to existing nodes on the graph
+   * @param tableName {String}
+   * @param row {Object}
+   */
+  async generateRelationships(tableName, row) {
     if (!tableName) throw new Error('generateRelationships: `tableName` is required.')
     if (!row) throw new Error('generateRelationships: `row` is required.')
     const { getRelationships } = this.tables[tableName]
