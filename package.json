@@ -7,12 +7,15 @@
     "test": "test"
   },
   "dependencies": {
-    "esm": "^3.2.25"
+    "bluebird": "^3.7.2",
+    "esm": "^3.2.25",
+    "neo4j-driver": "^4.3.2",
+    "pg-cursor": "^2.7.1"
   },
   "devDependencies": {
     "@databases/pg-test": "^3.0.1",
     "ava": "^3.15.0",
-    "pg": "^8.6.0"
+    "pg": "^8.7.1"
   },
   "scripts": {
     "test": "ava test/*.spec.js"
