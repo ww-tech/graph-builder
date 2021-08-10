@@ -7,6 +7,9 @@ function quote(value) {
     return `'${(value)}'`;
   return value;
 }
+
+const GRAPH_NODE = 'node';
+const GRAPH_REL = 'relationships';
 export default class GraphSync {
   constructor({ pgPool, neo4jClient, kafkaConsumerClient }) {
     this.pgPool = pgPool
@@ -14,21 +17,13 @@ export default class GraphSync {
     this.kafkaConsumerClient = kafkaConsumerClient
     this.tables = {}
   }
-
-  async initLoad() {
-    if (this.kafkaConsumerClient) {
-      //set kafka offset to latest.
-      //TBD
-    }
-    //import data from pg to neo4j.
-    //sort table, tables without foreignKey have higher priority to sync.
-    const orderedTables = Object.keys(this.tables).sort((table1, table2) => {
-      const len1 = Object.keys(this.tables[table1].foreignKeys).length;
-      const len2 = Object.keys(this.tables[table2].foreignKeys).length;
-      return len1 - len2;
-    });
+  async load(type) {
+    const tableArray = Object.keys(this.tables);
     //sync
-    await Promise.each(orderedTables, async(tableName) => {
+    await Promise.each(tableArray, async(tableName) => {
+      const { getLabels, getRelationships } = this.tables[tableName];
+      if (type === GRAPH_NODE && !getLabels) return;
+      if (type === GRAPH_REL && !getRelationships) return;
       const client = await this.pgPool.connect()
       const cursor = client.query(new Cursor(`select * from "${tableName}"`));
       const concurrency = 1000;
@@ -40,14 +35,28 @@ export default class GraphSync {
           });
           break;
         }
-        await Promise.each(rows, async (row) => {
-          const nodeCypher = await this.generateNode(tableName, row);
-          const relCypher = await this.generateRelationships(tableName, row);
-          if (nodeCypher) await this.neo4jClient.run(nodeCypher);
-          if (relCypher) await this.neo4jClient.run(relCypher);
+        await Promise.map(rows, async (row) => {
+          if (type === GRAPH_NODE) {
+            const nodeCypher = await this.generateNode(tableName, row);
+            if (nodeCypher) await this.neo4jClient.run(nodeCypher);
+          } else {
+            const relCypher = await this.generateRelationships(tableName, row);
+            await this.neo4jClient.run(relCypher);
+          }
+        }, {
+          concurrency: this.neo4jClient.getPoolSize()
         });
       }
     });
+  }
+  async initLoad() {
+    if (this.kafkaConsumerClient) {
+      //set kafka offset to latest.
+      //TBD
+    }
+    //import data from pg to neo4j.
+    await this.load(GRAPH_NODE);
+    await this.load(GRAPH_REL);
   }
 
   async registerTable(options = {}) {

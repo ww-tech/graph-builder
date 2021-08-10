@@ -1,10 +1,10 @@
 import GraphSync from '..'
-import neo4j from 'neo4j-driver'
 import pg from 'pg'
 import pgSetup from '@databases/pg-test/jest/globalSetup'
 import pgTeardown from '@databases/pg-test/jest/globalTeardown'
 import test from 'ava'
 import fs from 'fs'
+import Neo4jClient from '../src/Neo4jClient';
 
 let pgPool
 let graphSync
@@ -22,14 +22,9 @@ test.before(async function () {
   await wait(2000)
   pgPool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
   let neo4jClient;
-  if (process.env.NEO4J_URI) {
-    const driver = neo4j.driver(process.env.NEO4J_URI || defaultNeo4jConfig.uri,
-      neo4j.auth.basic(process.env.NEO4J_USER || defaultNeo4jConfig.user,
-        process.env.NEO4J_PASSWORD || defaultNeo4jConfig.password));
-    neo4jClient = driver.session({
-      database: process.env.NEO4J_DB || defaultNeo4jConfig.db,
-      defaultAccessMode: neo4j.session.WRITE,
-    });
+  //TBD: run neo4j container when running this test.
+  if (process.env.NODE_ENV === 'local') {
+    neo4jClient = new Neo4jClient(defaultNeo4jConfig);
     await neo4jClient.run(`MATCH (n) DETACH DELETE n`);
   }
   graphSync = new GraphSync({ pgPool, neo4jClient });
@@ -90,7 +85,8 @@ test.serial('generateRelationships', async t => {
 })
 
 test.serial('initLoad', async t => {
-  if (process.env.NEO4J_URI) {
+  //TBD: run neo4j container when running this test.
+  if (process.env.NODE_ENV === 'local') {
     await graphSync.initLoad();
   }
   t.is(1, 1);
