@@ -31,7 +31,7 @@ export default class GraphSync {
     await Promise.each(orderedTables, async(tableName) => {
       const client = await this.pgPool.connect()
       const cursor = client.query(new Cursor(`select * from "${tableName}"`));
-        const concurrency = 1000;
+      const concurrency = 1000;
       while (true) {
         const rows = await cursor.read(concurrency);
         if (rows.length === 0) {
