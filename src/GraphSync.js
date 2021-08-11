@@ -17,7 +17,7 @@ export default class GraphSync {
     this.kafkaConsumerClient = kafkaConsumerClient
     this.tables = {}
   }
-  async load(type) {
+  async load(type, batchSize = 1000) {
     const tableArray = Object.keys(this.tables);
     //sync
     await Promise.each(tableArray, async(tableName) => {
@@ -26,9 +26,8 @@ export default class GraphSync {
       if (type === GRAPH_REL && !getRelationships) return;
       const client = await this.pgPool.connect()
       const cursor = client.query(new Cursor(`select * from "${tableName}"`));
-      const rowCount = 1000;
       while (true) {
-        const rows = await cursor.read(rowCount);
+        const rows = await cursor.read(batchSize);
         if (rows.length === 0) {
           cursor.close(() => {
             client.release();
@@ -49,14 +48,14 @@ export default class GraphSync {
       }
     });
   }
-  async initLoad() {
+  async initialLoad(batchSize = 1000) {
     if (this.kafkaConsumerClient) {
       //set kafka offset to latest.
       //TBD
     }
     //import data from pg to neo4j.
-    await this.load(GRAPH_NODE);
-    await this.load(GRAPH_REL);
+    await this.load(GRAPH_NODE, batchSize);
+    await this.load(GRAPH_REL, batchSize);
   }
 
   async registerTable(options = {}) {
