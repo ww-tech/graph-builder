@@ -12,7 +12,8 @@
     "pg-cursor": "^2.7.1"
   },
   "peerDependencies": {
-    "neo4j-driver": ">=4.3.2"
+    "neo4j-driver": ">=4.3.2",
+    "pg": ">=8.7.1"
   },
   "devDependencies": {
     "@databases/pg-test": "^3.0.1",
