@@ -48,7 +48,7 @@ export default class GraphSync {
       }
     });
   }
-  async initialLoad(batchSize = 1000) {
+  async initialLoad({ batchSize = 1000 } = {}) {
     if (this.kafkaConsumerClient) {
       //set kafka offset to latest.
       //TBD
