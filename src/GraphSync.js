@@ -26,9 +26,9 @@ export default class GraphSync {
       if (type === GRAPH_REL && !getRelationships) return;
       const client = await this.pgPool.connect()
       const cursor = client.query(new Cursor(`select * from "${tableName}"`));
-      const concurrency = 1000;
+      const rowCount = 1000;
       while (true) {
-        const rows = await cursor.read(concurrency);
+        const rows = await cursor.read(rowCount);
         if (rows.length === 0) {
           cursor.close(() => {
             client.release();
