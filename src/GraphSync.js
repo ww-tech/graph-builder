@@ -1,11 +1,61 @@
 import stringifyProperties from './stringifyProperties'
+import Cursor from 'pg-cursor';
+import Promise from 'bluebird';
 
+function quote(value) {
+  if (typeof(value) === 'string')
+    return `'${(value)}'`;
+  return value;
+}
+
+const GRAPH_NODE = 'node';
+const GRAPH_REL = 'relationships';
 export default class GraphSync {
   constructor({ pgPool, neo4jClient, kafkaConsumerClient }) {
     this.pgPool = pgPool
     this.neo4jClient = neo4jClient
     this.kafkaConsumerClient = kafkaConsumerClient
     this.tables = {}
+  }
+  async load(type, batchSize = 1000) {
+    const tableArray = Object.keys(this.tables);
+    //sync
+    await Promise.each(tableArray, async(tableName) => {
+      const { getLabels, getRelationships } = this.tables[tableName];
+      if (type === GRAPH_NODE && !getLabels) return;
+      if (type === GRAPH_REL && !getRelationships) return;
+      const client = await this.pgPool.connect()
+      const cursor = client.query(new Cursor(`select * from "${tableName}"`));
+      while (true) {
+        const rows = await cursor.read(batchSize);
+        if (rows.length === 0) {
+          cursor.close(() => {
+            client.release();
+          });
+          break;
+        }
+        await Promise.map(rows, async (row) => {
+          if (type === GRAPH_NODE) {
+            const nodeCypher = await this.generateNode(tableName, row);
+            if (nodeCypher) await this.neo4jClient.run(nodeCypher);
+          } else {
+            const relCypher = await this.generateRelationships(tableName, row);
+            await this.neo4jClient.run(relCypher);
+          }
+        }, {
+          concurrency: this.neo4jClient.getPoolSize()
+        });
+      }
+    });
+  }
+  async initialLoad({ batchSize = 1000 } = {}) {
+    if (this.kafkaConsumerClient) {
+      //set kafka offset to latest.
+      //TBD
+    }
+    //import data from pg to neo4j.
+    await this.load(GRAPH_NODE, batchSize);
+    await this.load(GRAPH_REL, batchSize);
   }
 
   async registerTable(options = {}) {
@@ -140,7 +190,7 @@ export default class GraphSync {
         const thisLabelString = this.getLabelString(tableName, row)
         match.push(`(this${thisLabelString})`)
         primaryKey.forEach(col => {
-          where.push(`this.${col} = '${row[col]}'`)
+          where.push(`this.${col} = ${quote(row[col])}`)
         })
         return
       }
@@ -155,7 +205,7 @@ export default class GraphSync {
           err.silent = true
           throw err
         }
-        where.push(`${variable}.${col} = '${value}'`)
+        where.push(`${variable}.${col} = ${quote(value)}`)
       })
       const foreignRow = await this.findOne(foreignTable, query)
       const labelString = this.getLabelString(foreignTable, foreignRow)

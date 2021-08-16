@@ -4,17 +4,30 @@ import pgSetup from '@databases/pg-test/jest/globalSetup'
 import pgTeardown from '@databases/pg-test/jest/globalTeardown'
 import test from 'ava'
 import fs from 'fs'
+import Neo4jClient from '../src/Neo4jClient';
 
 let pgPool
 let graphSync
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
+const defaultNeo4jConfig = {
+  uri: 'bolt://localhost:7687',
+  user: 'neo4j',
+  password: '123',
+  db: 'test'
+}
 test.before(async function () {
   await pgSetup()
-  await wait(1000)
+  await wait(2000)
   pgPool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
-  graphSync = new GraphSync({ pgPool })
+  let neo4jClient;
+  //TBD: run neo4j container when running this test.
+  if (process.env.NODE_ENV === 'local') {
+    neo4jClient = new Neo4jClient(defaultNeo4jConfig);
+    await neo4jClient.run(`MATCH (n) DETACH DELETE n`);
+  }
+  graphSync = new GraphSync({ pgPool, neo4jClient });
   const sql = fs.readFileSync(`${__dirname}/fixtures.sql`, 'utf8')
   await graphSync.pgQuery(sql)
 })
@@ -68,8 +81,16 @@ test.serial('generateNode multiple labels', async t => {
 test.serial('generateRelationships', async t => {
   const row = await graphSync.findOne('books', { id: 2 })
   const cypher = await graphSync.generateRelationships('books', row)
-  t.is(cypher, "MATCH (this:Book), (author:Person:Author) WHERE this.id = '2' AND author.id = '1' MERGE (this)-[:HAS_AUTHOR]->(author);")
+  t.is(cypher, "MATCH (this:Book), (author:Person:Author) WHERE this.id = 2 AND author.id = 1 MERGE (this)-[:HAS_AUTHOR]->(author);")
 })
+
+test.serial('initLoad', async t => {
+  //TBD: run neo4j container when running this test.
+  if (process.env.NODE_ENV === 'local') {
+    await graphSync.initLoad();
+  }
+  t.is(1, 1);
+});
 
 test.after(() => {
   pgTeardown()
