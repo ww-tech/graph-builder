@@ -1,15 +1,12 @@
-import stringifyProperties from './stringifyProperties'
+import { stringifyProperties, setPropertiesString, quote } from './stringHelper'
 import Cursor from 'pg-cursor';
 import Promise from 'bluebird';
-
-function quote(value) {
-  if (typeof(value) === 'string')
-    return `'${(value)}'`;
-  return value;
-}
+import logger from './logger';
 
 const GRAPH_NODE = 'node';
 const GRAPH_REL = 'relationships';
+const DELETE = 'DELETE';
+const MERGE = 'MERGE';
 export default class GraphSync {
   constructor({ pgPool, neo4jClient, kafkaConsumerClient }) {
     this.pgPool = pgPool
@@ -21,9 +18,13 @@ export default class GraphSync {
     const tableArray = Object.keys(this.tables);
     //sync
     await Promise.each(tableArray, async(tableName) => {
-      const { getLabels, getRelationships } = this.tables[tableName];
+      const { getLabels, getRelationships, primaryKey } = this.tables[tableName];
       if (type === GRAPH_NODE && !getLabels) return;
       if (type === GRAPH_REL && !getRelationships) return;
+      if (type === GRAPH_NODE) {
+        const labels = await getLabels();
+        await this.neo4jClient.createUniqueConstraint(labels, primaryKey);
+      }
       const client = await this.pgPool.connect()
       const cursor = client.query(new Cursor(`select * from "${tableName}"`));
       while (true) {
@@ -40,7 +41,7 @@ export default class GraphSync {
             if (nodeCypher) await this.neo4jClient.run(nodeCypher);
           } else {
             const relCypher = await this.generateRelationships(tableName, row);
-            await this.neo4jClient.run(relCypher);
+            if (relCypher) await this.neo4jClient.run(relCypher);
           }
         }, {
           concurrency: this.neo4jClient.getPoolSize()
@@ -48,10 +49,37 @@ export default class GraphSync {
       }
     });
   }
+
+  async autoRegisterAllTables({
+    getTopic,
+    exclusiveTables = []
+  } = {}){
+    const { rows } = await this.pgQuery(`SELECT *
+        FROM pg_catalog.pg_tables
+        WHERE schemaname != 'pg_catalog' AND 
+        schemaname != 'information_schema';`);
+    await Promise.all(rows.map(async row => {
+      const tableName = row.tablename;
+      if (exclusiveTables.includes(tableName)) return;
+      const foreignKeys = await this.getForeignKeys(tableName);
+      const relationships = Object.keys(foreignKeys).map(key => {
+        return { from: 'this', to: key, label: `has_${key}`};
+      });
+      await this.registerTable({
+        tableName,
+        getLabels: () => [tableName],
+        getProperties: r => r,
+        getRelationships: r => relationships,
+        topic: getTopic(tableName)
+      });
+    }));
+  }
+
   async initialLoad({ batchSize = 1000 } = {}) {
     if (this.kafkaConsumerClient) {
       //set kafka offset to latest.
-      //TBD
+      await this.listen();//commit the last offset to kafka
+      await this.kafkaConsumerClient.pause();
     }
     //import data from pg to neo4j.
     await this.load(GRAPH_NODE, batchSize);
@@ -63,15 +91,23 @@ export default class GraphSync {
       tableName,
       getLabels,
       getProperties,
-      getRelationships
+      getRelationships,
+      topic
     } = options
     if (!tableName) throw new Error('registerTable: `tableName` is required.')
     this.tables[tableName] = {
+      tableName,
       primaryKey: await this.getPrimaryKey(tableName),
       foreignKeys: await this.getForeignKeys(tableName),
       getLabels,
       getProperties,
-      getRelationships
+      getRelationships,
+      topic
+    }
+    if (this.kafkaConsumerClient && topic) {
+      await this.kafkaConsumerClient.subscribe({ topic });
+    } else {
+      logger.info(`The topic of table(${tableName}) is not subscribed`);
     }
   }
 
@@ -80,17 +116,26 @@ export default class GraphSync {
    * @param tableName {String}
    * @param row {Object}
    */
-  async generateNode(tableName, row) {
+  async generateNode(tableName, row, { op = MERGE } = {}) {
     if (!tableName) throw new Error('generateNode: `tableName` is required.')
     if (!row) throw new Error('generateNode: `row` is required.')
-    const { getLabels, getProperties } = this.tables[tableName]
+    const { getLabels, getProperties, primaryKey } = this.tables[tableName]
     if (!getLabels) return
     const labels = await getLabels(row)
     if (!labels.length) return
     if (!getProperties) throw new Error('generateNode: `getProperties` is undefined.')
     const labelStr = `:${labels.join(':')}`
     const properties = await getProperties(row)
-    return `MERGE (${labelStr} ${stringifyProperties(properties)});`
+    const pkObject = {};
+    primaryKey.forEach(pk => {
+      pkObject[pk] = row[pk]
+    });
+    if (op === DELETE) {
+      return `MATCH (varName${labelStr} ${stringifyProperties(pkObject)}) DETACH DELETE varName;`
+    } else {
+      const setStr = setPropertiesString('varName', properties);
+      return `MERGE (varName${labelStr} ${stringifyProperties(pkObject)}) ON CREATE ${setStr} ON MATCH ${setStr};`;
+    }
   }
 
   /**
@@ -98,7 +143,7 @@ export default class GraphSync {
    * @param tableName {String}
    * @param row {Object}
    */
-  async generateRelationships(tableName, row) {
+  async generateRelationships(tableName, row, { op = MERGE } = {}) {
     if (!tableName) throw new Error('generateRelationships: `tableName` is required.')
     if (!row) throw new Error('generateRelationships: `row` is required.')
     const { getRelationships } = this.tables[tableName]
@@ -106,13 +151,14 @@ export default class GraphSync {
     const relationships = await getRelationships(row)
     if (!relationships.length) return
     const cypherQueries = await Promise.all(relationships.map(relationship => {
-      return this.createRelationship({
+      return this.generateRelationship({
         relationship,
         tableName,
-        row
+        row,
+        op
       })
     }))
-    return cypherQueries.join('\n')
+    return cypherQueries.filter(q => q);
   }
 
   async pgQuery(sql, values) {
@@ -180,18 +226,22 @@ export default class GraphSync {
     return rows[0]
   }
 
-  async createRelationship({ tableName, row, relationship }) {
+  async generateRelationship({ tableName, row, relationship, op = MERGE } = {}) {
     const { foreignKeys, primaryKey } = this.tables[tableName]
-    const variables = relationship.match(/\(.*?\)/g).map(key => key.replace(/[()]/g, ''))
-    const match = []
-    const where = []
-    await Promise.all(variables.map(async variable => {
+    // const variables = relationship.match(/\(.*?\)/g).map(key => key.replace(/[()]/g, ''))
+    const { from, to, label } = relationship;
+    if (!label) throw Error('relationship label can not be empty');
+    const variables = [from, to];
+    const match = [];
+    const where = [];
+    let noForeignKey = false;
+    await Promise.map(variables, async (variable, idx) => {
       if (variable === 'this') {
         const thisLabelString = this.getLabelString(tableName, row)
-        match.push(`(this${thisLabelString})`)
         primaryKey.forEach(col => {
           where.push(`this.${col} = ${quote(row[col])}`)
-        })
+        });
+        match[idx] = `(this${thisLabelString})`;
         return
       }
       if (!foreignKeys[variable]) throw new Error(`FK ${variable} does not exist.`)
@@ -201,17 +251,46 @@ export default class GraphSync {
         query[col] = row[columns[i]]
         const value = query[col]
         if (!value) {
-          const err = new Error('No foreign key value')
-          err.silent = true
-          throw err
+          noForeignKey = true;
+          return;
         }
         where.push(`${variable}.${col} = ${quote(value)}`)
-      })
+      });
+      if (noForeignKey) return;
       const foreignRow = await this.findOne(foreignTable, query)
       const labelString = this.getLabelString(foreignTable, foreignRow)
-      match.push(`(${variable}${labelString})`)
-    }))
-    return `MATCH ${match.join(', ')} WHERE ${where.join(' AND ')} MERGE ${relationship};`
+      match[idx] = `(${variable}${labelString})`;
+    });
+    if (noForeignKey || match.length === 0) return;
+    if (op === DELETE) {
+      return `MATCH ${match[0]}-[rel:${label}]->${match[1]} WHERE ${where.join(' AND ')} DELETE rel;`
+    } else {
+      const merge = `(${variables[0]})-[:${label}]->(${variables[1]})`;
+      return `MATCH ${match.join(', ')} WHERE ${where.join(' AND ')} MERGE ${merge};`
+    }
   }
 
+  async listen() {
+    await this.kafkaConsumerClient.run(async ({ topic, partition, message, parsedValue }) => {
+      const { before, after, source, op } = parsedValue;
+      const { table } = source;
+      if (before) {
+        //remove old relationships.
+        const delRelCypher = await this.generateRelationships(table, before, { op: DELETE });
+        if (delRelCypher) {
+          await this.neo4jClient.run(delRelCypher);
+        }
+      }
+
+      if (op === 'u' || op === 'c') {
+        const nodeCypher = await this.generateNode(table, after);
+        if (nodeCypher) await this.neo4jClient.run(nodeCypher);
+        const relCypher = await this.generateRelationships(table, after);
+        if (relCypher) await this.neo4jClient.run(relCypher);
+      } else if(op === 'd') {
+        const nodeCypher = await this.generateNode(table, before, { op: DELETE });
+        if (nodeCypher) await this.neo4jClient.run(nodeCypher);
+      }
+    });
+  }
 }

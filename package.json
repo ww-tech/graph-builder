@@ -2,22 +2,27 @@
   "name": "graph-sync",
   "version": "1.0.0",
   "description": "Keep PostgreSQL and Neo4j in sync using Kafka Connector.",
-  "main": "src/GraphSync.js",
+  "main": "src/index.js",
   "directories": {
     "test": "test"
   },
   "dependencies": {
+    "axios": "^0.21.1",
     "bluebird": "^3.7.2",
     "esm": "^3.2.25",
     "pg-cursor": "^2.7.1"
   },
   "peerDependencies": {
+    "avsc": ">=5.7.3",
+    "kafkajs": ">=1.15.0",
     "neo4j-driver": ">=4.3.2",
     "pg": ">=8.7.1"
   },
   "devDependencies": {
     "@databases/pg-test": "^3.0.1",
     "ava": "^3.15.0",
+    "avsc": "^5.7.3",
+    "kafkajs": "^1.15.0",
     "neo4j-driver": "^4.3.2",
     "pg": "^8.7.1"
   },
