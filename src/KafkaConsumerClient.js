@@ -16,7 +16,7 @@ export default class KafkaConsumerClient {
     * @param decoder:
     * @param options:
       {
-        decoder:
+        numPartitions:
       }
   */
   constructor(
@@ -59,7 +59,6 @@ export default class KafkaConsumerClient {
   }
 
   async run(cb) {
-    if (!this.decoder) throw Error('');
     if (this.consumer.paused().length) {
       return this.resume();
     }
