@@ -52,7 +52,8 @@ export default class GraphSync {
 
   async autoRegisterAllTables({
     getTopic,
-    exclusiveTables = []
+    exclusiveTables = [],
+    inclusiveTables = [],
   } = {}){
     const { rows } = await this.pgQuery(`SELECT *
         FROM pg_catalog.pg_tables
@@ -61,6 +62,7 @@ export default class GraphSync {
     await Promise.all(rows.map(async row => {
       const tableName = row.tablename;
       if (exclusiveTables.includes(tableName)) return;
+      if (inclusiveTables.length && !inclusiveTables.includes(tableName)) return;
       const foreignKeys = await this.getForeignKeys(tableName);
       const relationships = Object.keys(foreignKeys).map(key => {
         return { from: 'this', to: key, label: `has_${key}`};
@@ -271,6 +273,7 @@ export default class GraphSync {
   }
 
   async listen() {
+    if (!this.kafkaConsumerClient) return;
     await this.kafkaConsumerClient.run(async ({ topic, partition, message, parsedValue }) => {
       const { before, after, source, op } = parsedValue;
       const { table } = source;
