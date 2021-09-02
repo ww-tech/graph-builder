@@ -1,4 +1,4 @@
-import GraphSync from '..'
+import GraphSync from '../src/GraphSync';
 import pg from 'pg'
 import pgSetup from '@databases/pg-test/jest/globalSetup'
 import pgTeardown from '@databases/pg-test/jest/globalTeardown'
@@ -42,7 +42,7 @@ test.serial('registerTable', async t => {
     tableName: 'books',
     getLabels: () => ['Book'],
     getProperties: row => ({ id: row.id, title: row.title }),
-    getRelationships: row => (['(this)-[:HAS_AUTHOR]->(author)'])
+    getRelationships: row => ([{ from: 'this', to: 'author', label: 'HAS_AUTHOR' }])
   })
   t.deepEqual(graphSync.tables.books.primaryKey, ['id'])
   t.is(graphSync.tables.books.foreignKeys.author.foreignTable, 'authors')
@@ -69,25 +69,25 @@ test.skip('registerTable alternate syntax', async t => {
 test.serial('generateNode single label', async t => {
   const row = await graphSync.findOne('books', { id: 2 })
   const cypher = await graphSync.generateNode('books', row)
-  t.is(cypher, "MERGE (:Book {id: 2, title: 'The Great Gatsby'});")
+  t.is(cypher, "MERGE (varName:Book {id: 2}) ON CREATE SET varName.id = 2, varName.title = \'The Great Gatsby\' ON MATCH SET varName.id = 2, varName.title = \'The Great Gatsby\';")
 })
 
 test.serial('generateNode multiple labels', async t => {
   const row = await graphSync.findOne('authors', { id: 1 })
   const cypher = await graphSync.generateNode('authors', row)
-  t.is(cypher, "MERGE (:Person:Author {id: 1, name: 'F. Scott Fitzgerald'});")
+  t.is(cypher, "MERGE (varName:Person:Author {id: 1}) ON CREATE SET varName.id = 1, varName.name = \'F. Scott Fitzgerald\' ON MATCH SET varName.id = 1, varName.name = \'F. Scott Fitzgerald\';");
 })
 
 test.serial('generateRelationships', async t => {
   const row = await graphSync.findOne('books', { id: 2 })
   const cypher = await graphSync.generateRelationships('books', row)
-  t.is(cypher, "MATCH (this:Book), (author:Person:Author) WHERE this.id = 2 AND author.id = 1 MERGE (this)-[:HAS_AUTHOR]->(author);")
+  t.deepEqual(cypher, ["MATCH (this:Book), (author:Person:Author) WHERE this.id = 2 AND author.id = 1 MERGE (this)-[:HAS_AUTHOR]->(author);"]);
 })
 
-test.serial('initLoad', async t => {
+test.serial('initialLoad', async t => {
   //TBD: run neo4j container when running this test.
   if (process.env.NODE_ENV === 'local') {
-    await graphSync.initLoad();
+    await graphSync.initialLoad();
   }
   t.is(1, 1);
 });
